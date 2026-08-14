@@ -7,7 +7,7 @@ DeepSeek Harness bridge plugin for [Better DeepSeek](https://github.com/EdgeTypE
 
 ### Via DSH (npm)
 ```bash
-dsh plugin --profile web add dsh-better-deepseek
+dsh plugin --profile web add -w dsh-better-deepseek
 ```
 
 ### Via PowerShell One-Liner (Windows)
