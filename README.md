@@ -10,10 +10,17 @@ DeepSeek Harness bridge plugin for [Better DeepSeek](https://github.com/EdgeTypE
 dsh plugin --profile web add -w dsh-better-deepseek
 ```
 
-### Via PowerShell One-Liner (Windows)
+or
+
+```bash
+npx @deepseek-ai/dsh --profile web add -w dsh-better-deepseek
+```
+
+
+<!-- ### Via PowerShell One-Liner (Windows)
 ```powershell
 irm https://raw.githubusercontent.com/EdgeTypE/dsh-better-deepseek/main/scripts/install.ps1 | iex
-```
+``` -->
 
 ## Plugin
 
