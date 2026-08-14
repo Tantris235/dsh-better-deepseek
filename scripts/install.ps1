@@ -3,9 +3,9 @@
 #
 # Supports both:
 #   1. Remote install from npm registry via DSH CLI:
-#      irm https://raw.githubusercontent.com/EdgeTypE/better-deepseek/main/scripts/install.ps1 | iex
+#      irm https://raw.githubusercontent.com/EdgeTypE/dsh-better-deepseek/main/scripts/install.ps1 | iex
 #   2. Local development install from source directory:
-#      powershell -ExecutionPolicy Bypass -File install.ps1 -LocalPath "A:\Users\Edige\GitHub\deepseek-harness\packages\extensions\better-deepseek"
+#      powershell -ExecutionPolicy Bypass -File install.ps1 -LocalPath "C:\Users\YOUR_USERNAME\GitHub\deepseek-harness\packages\extensions\better-deepseek"
 # =============================================================================
 param(
   [string]$Version = '',
@@ -20,9 +20,11 @@ $REGISTRY = if ($env:REGISTRY) { $env:REGISTRY } else { 'https://registry.npmjs.
 # DSH_HOME resolution
 if ($env:DSH_HOME) {
   $DSH_HOME = $env:DSH_HOME
-} elseif ($env:USERPROFILE) {
+}
+elseif ($env:USERPROFILE) {
   $DSH_HOME = Join-Path $env:USERPROFILE '.dsh'
-} else {
+}
+else {
   $DSH_HOME = Join-Path $HOME '.dsh'
 }
 $PROFILE_DIR = Join-Path $DSH_HOME 'profiles\web'
@@ -31,9 +33,9 @@ $WS_YML = Join-Path $PROFILE_DIR 'pnpm-workspace.yaml'
 $PATCH_YML = Join-Path $PROFILE_DIR 'cordis.patch.yml'
 $PKG_JSON = Join-Path $PROFILE_DIR 'package.json'
 
-function Say([string]$m)  { Write-Host "[install] $m" -ForegroundColor Green }
+function Say([string]$m) { Write-Host "[install] $m" -ForegroundColor Green }
 function Warn([string]$m) { Write-Host "[warn] $m" -ForegroundColor Yellow }
-function Die([string]$m)  { Write-Host "[error] $m" -ForegroundColor Red; exit 1 }
+function Die([string]$m) { Write-Host "[error] $m" -ForegroundColor Red; exit 1 }
 
 # Resolve version from npm
 function Resolve-Spec {
@@ -188,7 +190,8 @@ if ($wsCode -ne 0) { Die "Failed to configure $WS_YML ($wsCode): $wsResult" }
 # Step 2: Official CLI Installation
 if ($CLI -eq 'dsh') {
   $cliArgs = @('plugin', '--profile', 'web', 'add', "$PKG@$SPEC")
-} else {
+}
+else {
   $cliArgs = @('-y', '--package', '@deepseek-ai/dsh', 'dsh', 'plugin', '--profile', 'web', 'add', "$PKG@$SPEC")
 }
 Say "Running $CLI plugin --profile web add $PKG@$SPEC ..."
@@ -207,6 +210,7 @@ if ($Restart) {
     Say 'Restarting dsh-web via pm2...'
     pm2 restart dsh-web
   }
-} else {
+}
+else {
   Say "Next step: Restart your DSH server ('npx @deepseek-ai/dsh web')."
 }
