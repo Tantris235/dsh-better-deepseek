@@ -2,6 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -23,6 +24,7 @@ export class BetterDeepSeekBridgeService extends Service {
   })
 
   private readonly sseClients = new Set<ServerResponse>()
+  private readonly latestAssistantTextBySession = new Map<string, string>()
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'betterDeepSeekBridge')
@@ -44,7 +46,7 @@ export class BetterDeepSeekBridgeService extends Service {
             res.end(JSON.stringify({
               active: true,
               version: '1.6.0',
-              capabilities: ['filtered_sse', 'approvals', 'rag_inject'],
+              capabilities: ['filtered_sse', 'approvals', 'rag_inject', 'session_result'],
             }))
             return
           }
@@ -65,7 +67,28 @@ export class BetterDeepSeekBridgeService extends Service {
             return
           }
 
-          // 3. RPC Endpoints (session.create, session.prompt)
+          // 3. Get Session Result (Polling / Fetching Final Response)
+          if (pathname === '/api/better-deepseek/session.result' && req.method === 'GET') {
+            const sessionId = url.searchParams.get('sessionId') ?? ''
+            const finalText = this.latestAssistantTextBySession.get(sessionId) ?? ''
+            const agent = this.ctx.agents.get(sessionId as SessionId)
+
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+              type: 'server-response',
+              result: {
+                ok: true,
+                value: {
+                  sessionId,
+                  status: agent?.status ?? 'idle',
+                  finalText,
+                },
+              },
+            }))
+            return
+          }
+
+          // 4. RPC Endpoints (session.create, session.prompt, session.cancel)
           if (req.method === 'POST') {
             const body = await this.readJsonBody(req)
             const rpcId = body.rpcId ?? `bd-rpc-${Date.now()}`
@@ -75,9 +98,41 @@ export class BetterDeepSeekBridgeService extends Service {
               try {
                 const cwd = body.payload?.cwd ?? process.cwd()
                 const sessionId = `session-${Date.now()}` as SessionId
+                this.latestAssistantTextBySession.set(sessionId, '')
+
+                const defaultModel = this.ctx.get('agentDefaultModel') as any
+                const selection = defaultModel
+                  ? defaultModel.currentSelection()
+                  : { provider: 'deepseek-official', model: 'deepseek-chat' }
+
+                const presets = this.ctx.get('agentPresets') as any
+                let presetId: string | undefined
+                if (presets) {
+                  try {
+                    const resolved = await presets.resolve(undefined)
+                    presetId = resolved?.id
+                  } catch {
+                    // Ignore preset resolve failure
+                  }
+                }
+
                 await this.ctx.agents.create({
                   sessionId,
-                  meta: { cwd },
+                  meta: {
+                    cwd,
+                    ...(presetId !== undefined ? { agentPreset: presetId } : {}),
+                  },
+                  agentOptions: {
+                    provider: selection.provider,
+                    model: selection.model,
+                  },
+                  setup: async (agentCtx) => {
+                    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+                    installModelSelection(agentCtx, selected)
+                    if (presets && presetId) {
+                      await presets.mount(agentCtx, presetId)
+                    }
+                  },
                 })
 
                 res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -138,6 +193,33 @@ export class BetterDeepSeekBridgeService extends Service {
               }
               return
             }
+
+            // session.cancel
+            if (pathname === '/api/better-deepseek/session.cancel') {
+              const sessionId = (body.payload?.sessionId ?? '') as SessionId
+              const agent = this.ctx.agents.get(sessionId)
+
+              if (agent) {
+                agent.cancel('user-request' as any)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                  type: 'server-response',
+                  rpcId,
+                  result: { ok: true, value: { canceled: true } },
+                }))
+              } else {
+                res.writeHead(404, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                  type: 'server-response',
+                  rpcId,
+                  result: {
+                    ok: false,
+                    error: { message: `Session "${sessionId}" not found` },
+                  },
+                }))
+              }
+              return
+            }
           }
 
           res.writeHead(404, { 'Content-Type': 'text/plain' })
@@ -146,7 +228,7 @@ export class BetterDeepSeekBridgeService extends Service {
       })
     }, 'better-deepseek: gateway router')
 
-    // 4. Event Listener Registrations
+    // 5. Event Listener Registrations
     this.setupEventListeners()
   }
 
@@ -178,15 +260,32 @@ export class BetterDeepSeekBridgeService extends Service {
   }
 
   private setupEventListeners(): void {
-    // Durable session event stream (assistant chunks, step start/end, tool calls, tool results)
+    // Durable session event stream (assistant chunks & full messages)
     this.ctx.effect(() => {
       return this.ctx.on('session/event', (session, event) => {
         if (event.type === 'assistant/chunk') {
-          const chunkData = event.data as { text?: string; delta?: string }
-          this.broadcast('assistant/chunk', {
-            sessionId: session.id,
-            delta: chunkData.text ?? chunkData.delta ?? '',
-          })
+          const chunkData = event.data as { text?: string; delta?: string; chunk?: { text?: string; delta?: string } }
+          const delta = chunkData.text ?? chunkData.delta ?? chunkData.chunk?.text ?? chunkData.chunk?.delta ?? ''
+          if (delta) {
+            const current = this.latestAssistantTextBySession.get(session.id) ?? ''
+            this.latestAssistantTextBySession.set(session.id, current + delta)
+            this.broadcast('assistant/chunk', {
+              sessionId: session.id,
+              delta,
+            })
+          }
+        }
+
+        if (event.type === 'assistant/message') {
+          const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } }
+          const text = data.message?.content?.filter((c) => c.type === 'text').map((c) => c.text).join('') ?? ''
+          if (text) {
+            this.latestAssistantTextBySession.set(session.id, text)
+            this.broadcast('assistant/message', {
+              sessionId: session.id,
+              text,
+            })
+          }
         }
       })
     }, 'better-deepseek: session event listener')
@@ -220,9 +319,15 @@ export class BetterDeepSeekBridgeService extends Service {
       })
     }, 'better-deepseek: tool post-execute listener')
 
-    // Agent turn stopping (serial notification)
+    // Agent turn stopping (turn/stopping & turn/complete with final text)
     this.ctx.effect(() => {
       return this.ctx.on('agent/turn-stopping', (payload) => {
+        const finalText = this.latestAssistantTextBySession.get(payload.agent.id) ?? ''
+        this.broadcast('turn/complete', {
+          sessionId: payload.agent.id,
+          turn: payload.turn,
+          finalText,
+        })
         this.broadcast('turn/stopping', {
           sessionId: payload.agent.id,
           turn: payload.turn,

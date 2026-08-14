@@ -13,6 +13,7 @@ export declare class BetterDeepSeekBridgeService extends Service {
     static inject: string[];
     static Config: z<Config>;
     private readonly sseClients;
+    private readonly latestAssistantTextBySession;
     constructor(ctx: Context, config: Config);
     private handleCors;
     private readJsonBody;

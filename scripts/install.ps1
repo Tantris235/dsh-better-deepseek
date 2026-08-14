@@ -14,7 +14,7 @@ param(
   [switch]$DryRun
 )
 
-$PKG = '@deepseek-ai/dsh-better-deepseek'
+$PKG = 'dsh-better-deepseek'
 $REGISTRY = if ($env:REGISTRY) { $env:REGISTRY } else { 'https://registry.npmjs.org' }
 
 # DSH_HOME resolution
@@ -26,7 +26,7 @@ if ($env:DSH_HOME) {
   $DSH_HOME = Join-Path $HOME '.dsh'
 }
 $PROFILE_DIR = Join-Path $DSH_HOME 'profiles\web'
-$PROFILE_NM = Join-Path $DSH_HOME 'profiles\node_modules\@deepseek-ai'
+$PROFILE_NM = Join-Path $DSH_HOME 'profiles\node_modules'
 $WS_YML = Join-Path $PROFILE_DIR 'pnpm-workspace.yaml'
 $PATCH_YML = Join-Path $PROFILE_DIR 'cordis.patch.yml'
 $PKG_JSON = Join-Path $PROFILE_DIR 'package.json'
@@ -167,11 +167,11 @@ if (!/^\s*allowBuilds:\s*$/m.test(t)) {
     }
   }
 }
-if (!/^\s*-\s+@deepseek-ai\/dsh-better-deepseek\s*$/m.test(t)) {
+if (!/^\s*-\s+dsh-better-deepseek\s*$/m.test(t)) {
   if (/^\s*minimumReleaseAgeExclude:\s*$/m.test(t)) {
-    t = t.replace(/^(\s*minimumReleaseAgeExclude:\s*)$/m, "$1\n  - @deepseek-ai/dsh-better-deepseek");
+    t = t.replace(/^(\s*minimumReleaseAgeExclude:\s*)$/m, "$1\n  - dsh-better-deepseek");
   } else {
-    t += "\nminimumReleaseAgeExclude:\n  - @deepseek-ai/dsh-better-deepseek\n";
+    t += "\nminimumReleaseAgeExclude:\n  - dsh-better-deepseek\n";
   }
 }
 if (t !== before) fs.writeFileSync(p, t);
