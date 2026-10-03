@@ -45,7 +45,8 @@ export class BetterDeepSeekBridgeService extends Service {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({
               active: true,
-              version: '1.6.0',
+              version: '2.0.0',
+              harness_version: '0.2.0-rc.2',
               capabilities: ['filtered_sse', 'approvals', 'rag_inject', 'session_result'],
             }))
             return
@@ -102,14 +103,14 @@ export class BetterDeepSeekBridgeService extends Service {
 
                 const defaultModel = this.ctx.get('agentDefaultModel') as any
                 const selection = defaultModel
-                  ? defaultModel.currentSelection()
+                  ? defaultModel.currentSelection?.()
                   : { provider: 'deepseek-official', model: 'deepseek-chat' }
 
                 const presets = this.ctx.get('agentPresets') as any
                 let presetId: string | undefined
                 if (presets) {
                   try {
-                    const resolved = await presets.resolve(undefined)
+                    const resolved = await presets.resolve?.(undefined)
                     presetId = resolved?.id
                   } catch {
                     // Ignore preset resolve failure
@@ -123,14 +124,17 @@ export class BetterDeepSeekBridgeService extends Service {
                     ...(presetId !== undefined ? { agentPreset: presetId } : {}),
                   },
                   agentOptions: {
-                    provider: selection.provider,
-                    model: selection.model,
+                    provider: selection?.provider ?? 'deepseek-official',
+                    model: selection?.model ?? 'deepseek-chat',
                   },
                   setup: async (agentCtx) => {
-                    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+                    const selected: ModelSelectionRef = { 
+                      current: selection ?? { provider: 'deepseek-official', model: 'deepseek-chat' }, 
+                      assembled: undefined 
+                    }
                     installModelSelection(agentCtx, selected)
                     if (presets && presetId) {
-                      await presets.mount(agentCtx, presetId)
+                      await presets.mount?.(agentCtx, presetId)
                     }
                   },
                 })
@@ -172,7 +176,7 @@ export class BetterDeepSeekBridgeService extends Service {
                   content: [{ type: 'text', text }],
                 } as unknown as UserMessage
 
-                agent.followup(userMsg)
+                agent.followup?.(userMsg)
 
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({
@@ -200,7 +204,7 @@ export class BetterDeepSeekBridgeService extends Service {
               const agent = this.ctx.agents.get(sessionId)
 
               if (agent) {
-                agent.cancel('user-request' as any)
+                agent.cancel?.('user-request' as any)
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({
                   type: 'server-response',
@@ -263,9 +267,15 @@ export class BetterDeepSeekBridgeService extends Service {
     // Durable session event stream (assistant chunks & full messages)
     this.ctx.effect(() => {
       return this.ctx.on('session/event', (session, event) => {
+        // Handle assistant/chunk event with improved type safety
         if (event.type === 'assistant/chunk') {
-          const chunkData = event.data as { text?: string; delta?: string; chunk?: { text?: string; delta?: string } }
-          const delta = chunkData.text ?? chunkData.delta ?? chunkData.chunk?.text ?? chunkData.chunk?.delta ?? ''
+          const chunkData = event.data as { 
+            text?: string
+            delta?: string
+            chunk?: { text?: string; delta?: string }
+            content?: string
+          }
+          const delta = chunkData.text ?? chunkData.delta ?? chunkData.chunk?.text ?? chunkData.chunk?.delta ?? chunkData.content ?? ''
           if (delta) {
             const current = this.latestAssistantTextBySession.get(session.id) ?? ''
             this.latestAssistantTextBySession.set(session.id, current + delta)
@@ -276,9 +286,17 @@ export class BetterDeepSeekBridgeService extends Service {
           }
         }
 
+        // Handle assistant/message event
         if (event.type === 'assistant/message') {
-          const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } }
-          const text = data.message?.content?.filter((c) => c.type === 'text').map((c) => c.text).join('') ?? ''
+          const data = event.data as { 
+            message?: { content?: Array<{ type: string; text?: string }> }
+            content?: string
+            text?: string
+          }
+          const text = data.message?.content?.filter((c) => c.type === 'text').map((c) => c.text).join('') 
+            ?? data.content 
+            ?? data.text 
+            ?? ''
           if (text) {
             this.latestAssistantTextBySession.set(session.id, text)
             this.broadcast('assistant/message', {
@@ -301,7 +319,7 @@ export class BetterDeepSeekBridgeService extends Service {
             args: exec.arguments,
           })
         }
-        return next()
+        return next?.()
       })
     }, 'better-deepseek: tool pre-execute listener')
 
@@ -315,7 +333,7 @@ export class BetterDeepSeekBridgeService extends Service {
             output: result,
           })
         }
-        return next()
+        return next?.()
       })
     }, 'better-deepseek: tool post-execute listener')
 
